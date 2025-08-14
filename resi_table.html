@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8" />
+<title>Tabella Resi – dinamica con priorità</title>
+<style>
+  :root{
+    --teal-500:#46d0c6;
+    --teal-600:#35bfb5;
+    --border:#E6E6E6;
+    --text:#111111;
+    --text-muted:#666666;
+    --radius:12px;
+    --shadow:0 1px 2px rgba(0,0,0,.04);
+    --table-min:920px;
+    --cell-px:12px;
+    --row-green:#eefaf3;
+    --row-yellow:#fff9e6;
+    --row-red:#fff1f0;
+  }
+  *{ box-sizing:border-box; }
+  body{
+    margin:24px;
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
+    color:var(--text);
+    background:#fff;
+  }
+  .table-wrap{
+    max-width:1200px;
+    border:1px solid var(--border);
+    border-radius:var(--radius);
+    overflow:auto;
+    box-shadow:var(--shadow);
+  }
+  table{
+    width:100%;
+    min-width:var(--table-min);
+    table-layout:fixed;
+    border-collapse:separate;
+    border-spacing:0;
+    font-size:14px;
+    line-height:1.4;
+  }
+  thead th{
+    background:var(--teal-500);
+    color:#0e0e0e;
+    font-weight:700;
+    text-align:center;
+    padding:var(--cell-px);
+    border-right:1px solid rgba(0,0,0,.06);
+    position:sticky; top:0;
+  }
+  thead th:first-child{ border-top-left-radius:var(--radius); }
+  thead th:last-child{ border-top-right-radius:var(--radius); border-right:none; }
+
+  tbody td{
+    padding:var(--cell-px);
+    text-align:center;
+    border-top:1px solid var(--border);
+    border-right:1px solid var(--border);
+    color:var(--text-muted);
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+    vertical-align:middle;
+  }
+  tbody td:first-child,
+  tbody td:nth-child(2),
+  tbody td:nth-child(3){ text-align:left; }
+  tbody td:last-child{ border-right:none; }
+
+  /* Hover leggero mantenendo il colore di priorità visibile */
+  tbody tr:hover td{ filter: brightness(0.985); }
+
+  /* Colonne equilibrate */
+  colgroup col:nth-child(1){ width:16%; }
+  colgroup col:nth-child(2){ width:24%; }
+  colgroup col:nth-child(3){ width:18%; }
+  colgroup col:nth-child(4){ width:14%; }
+  colgroup col:nth-child(5){ width:16%; }
+  colgroup col:nth-child(6){ width:12%; }
+
+  /* Select stato */
+  .status-cell{ padding-right:16px; }
+  .status-stack{
+    display:grid;
+    gap:6px;
+    justify-items:end;
+  }
+  .status-select{
+    width:100%;
+    max-width:200px;
+    padding:6px 8px;
+    border:1px solid var(--border);
+    border-radius:8px;
+    background:#fff;
+    font:inherit;
+    color:var(--text);
+    outline:none;
+  }
+  .status-select:focus{ border-color:var(--teal-600); }
+
+  /* Semaforo */
+  .priority-wrap{
+    display:inline-flex;
+    align-items:center;
+    gap:10px;
+  }
+  .traffic-light{
+    display:inline-flex;
+    flex-direction:column;
+    justify-content:center;
+    gap:4px;
+    width:14px;
+    padding:2px 0;
+  }
+  .light{
+    width:10px;height:10px;
+    border-radius:50%;
+    background:#e8e8e8;
+    border:1px solid #d0d0d0;
+  }
+  .traffic-light[data-color="red"]    .light.red{    background:#e74c3c; border-color:#d34133; }
+  .traffic-light[data-color="yellow"] .light.yellow{ background:#f1c40f; border-color:#d1a90d; }
+  .traffic-light[data-color="green"]  .light.green{  background:#27ae60; border-color:#1d8e4e; }
+
+  /* Badge stato */
+  .badge{
+    display:inline-block;
+    padding:2px 8px;
+    border-radius:999px;
+    border:1px solid var(--border);
+    font-size:12px;
+    color:#333;
+    background:#fff;
+  }
+
+  /* Colori riga per priorità */
+  .row-green  td{ background: var(--row-green); }
+  .row-yellow td{ background: var(--row-yellow); }
+  .row-red    td{ background: var(--row-red); }
+
+/* --- Allarga "Status / Priorità" --- */
+colgroup col:nth-child(6){ width: 22% !important; }  /* prima era ~12% */
+
+/* Assicura spazio minimo nella cella */
+.status-cell{ min-width: 320px; }
+
+/* Lascia espandere il select */
+.status-select{
+  max-width: none;
+  width: 100%;
+}
+
+/* (opzionale) aumenta lo spazio totale per evitare schiacciamenti */
+table{ min-width: calc(var(--table-min) + 240px); }
+
+
+
+
+</style>
+</head>
+<body>
+
+<div class="table-wrap">
+  <table role="table" aria-label="Riepilogo Resi">
+    <colgroup>
+      <col /><col /><col /><col /><col /><col />
+    </colgroup>
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Cliente</th>
+        <th>Agente</th>
+        <th>Data Ritiro</th>
+        <th>Data entrata Merce</th>
+        <th>Status / Priorità</th>
+      </tr>
+    </thead>
+    <tbody id="tbody"></tbody>
+  </table>
+</div>
+
+<script>
+  // Mappa stato -> colore semaforo e label
+  const STATE_MAP = {
+    "in_viaggio":   { color: "yellow", label: "Ritiro in corso" },
+    "ritirato":     { color: "green",  label: "Ritirato" },
+    "non_ritirato": { color: "red",    label: "Non ritirato" },
+    "sollecito1":   { color: "red",    label: "Sollecito 7gg" },
+    "sollecito2":   { color: "red",    label: "Sollecito 15gg" },
+    "sollecito3":   { color: "red",    label: "Sollecito fine mese" }
+  };
+
+  // Dataset di esempio (rendila dinamica sostituendo/riempiendo questo array)
+  const rows = [
+    { id:"RIF-001", cliente:"CliSpe + Rascl", agente:"AG001 • Mario Rossi", dataRitiro:"2025-08-10", dataEntrata:"—", stato:"in_viaggio" },
+    { id:"RIF-002", cliente:"Alfa Spa",       agente:"AG012 • Sara Bianchi", dataRitiro:"2025-08-09", dataEntrata:"2025-08-11", stato:"ritirato" },
+    { id:"RIF-003", cliente:"Beta Srl",       agente:"AG007 • Luca Verdi",   dataRitiro:"2025-08-01", dataEntrata:"—", stato:"sollecito3" },
+  ];
+
+  function getRowClass(color){
+    return color === "green" ? "row-green"
+         : color === "yellow" ? "row-yellow"
+         : color === "red" ? "row-red"
+         : "";
+  }
+
+  function statusOptions(current){
+    return `
+      <option value="">-- Seleziona stato --</option>
+      <option value="in_viaggio" ${current==="in_viaggio"?"selected":""}>Ritiro in corso</option>
+      <option value="ritirato" ${current==="ritirato"?"selected":""}>Ritirato</option>
+      <option value="non_ritirato" ${current==="non_ritirato"?"selected":""}>Non ritirato</option>
+      <option value="sollecito1" ${current==="sollecito1"?"selected":""}>Sollecito 7gg</option>
+      <option value="sollecito2" ${current==="sollecito2"?"selected":""}>Sollecito 15gg</option>
+      <option value="sollecito3" ${current==="sollecito3"?"selected":""}>Sollecito fine mese</option>
+    `;
+  }
+
+  function renderTable(data){
+    const tb = document.getElementById('tbody');
+    tb.innerHTML = data.map((r, idx) => {
+      const conf = STATE_MAP[r.stato] || {};
+      const rowClass = getRowClass(conf.color || "");
+      return `
+        <tr class="${rowClass}" data-index="${idx}">
+          <td>${r.id || "N° Rif."}</td>
+          <td>${r.cliente || ""}</td>
+          <td>${r.agente || ""}</td>
+          <td>${r.dataRitiro || ""}</td>
+          <td>${r.dataEntrata || ""}</td>
+          <td class="status-cell">
+            <div class="status-stack">
+              <select class="status-select">
+                ${statusOptions(r.stato || "")}
+              </select>
+              <div class="priority-wrap">
+                <div class="traffic-light" data-color="${conf.color || ""}" aria-label="Priorità automatica">
+                  <span class="light red"></span>
+                  <span class="light yellow"></span>
+                  <span class="light green"></span>
+                </div>
+                <span class="badge status-badge">${conf.label || "—"}</span>
+              </div>
+            </div>
+          </td>
+        </tr>
+      `;
+    }).join("");
+  }
+
+  // Event delegation: aggiorna riga quando cambia lo stato
+  document.addEventListener('change', (e)=>{
+    if(!e.target.classList.contains('status-select')) return;
+    const tr = e.target.closest('tr');
+    const idx = Number(tr.dataset.index);
+    const value = e.target.value;
+
+    rows[idx].stato = value;
+    const conf = STATE_MAP[value] || { color:"", label:"—" };
+
+    // semaforo
+    tr.querySelector('.traffic-light').setAttribute('data-color', conf.color);
+    tr.querySelector('.status-badge').textContent = conf.label;
+
+    // colore riga
+    tr.classList.remove('row-green','row-yellow','row-red');
+    tr.classList.add(getRowClass(conf.color));
+  });
+
+  // Render iniziale
+  renderTable(rows);
+
+  // Esempio: per aggiungere dinamicamente una riga:
+  // rows.push({id:"RIF-004",cliente:"Gamma S.p.A.",agente:"AG020 • P. Neri",dataRitiro:"2025-08-12",dataEntrata:"—",stato:"non_ritirato"});
+  // renderTable(rows);
+</script>
+
+</body>
+</html>
